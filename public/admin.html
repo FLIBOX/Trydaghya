@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="p-10">
+
+<h1 class="text-xl font-bold mb-4">Admin Realtime</h1>
+
+<div id="log" class="bg-gray-100 p-4 h-96 overflow-auto"></div>
+
+<script>
+const socket = io();
+
+function log(t){
+  document.getElementById("log").innerHTML += "<div>"+t+"</div>";
+}
+
+socket.on("call.started", d => log("Call started " + d.callId));
+socket.on("stt", t => log("User: " + t));
+socket.on("ai", t => log("AI: " + t));
+socket.on("tts.ready", t => log("Audio ready: " + t));
+</script>
+
+</body>
+</html>

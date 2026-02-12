@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="p-10">
+
+<h1 class="text-xl font-bold mb-4">Realtime Voice Agent 🎤</h1>
+
+<button id="start" class="bg-green-500 text-white p-3">Start Talking</button>
+<button id="stop" class="bg-red-500 text-white p-3">Stop</button>
+
+<div id="log" class="mt-6"></div>
+
+<script>
+const socket = io();
+let recorder;
+
+function log(t){
+  document.getElementById("log").innerHTML += "<div>"+t+"</div>";
+}
+
+document.getElementById("start").onclick = async () => {
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
+
+  recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+
+  recorder.ondataavailable = async (e) => {
+    const buf = await e.data.arrayBuffer();
+    socket.emit("audio.chunk", buf);
+  };
+
+  recorder.start(250); // every 250ms chunk
+};
+
+document.getElementById("stop").onclick = () => {
+  recorder.stop();
+};
+
+socket.on("stt", t => log("User: " + t));
+socket.on("ai", t => log("AI: " + t));
+socket.on("tts", file => {
+  const audio = new Audio(file);
+  audio.play();
+});
+</script>
+
+</body>
+</html>
