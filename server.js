@@ -2,10 +2,10 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const fs = require("fs");
+const path = require("path");
 
 const stt = require("./services/stt");
 const llm = require("./services/llm");
-const tts = require("./services/tts");
 
 const app = express();
 app.use(express.static("public"));
@@ -13,35 +13,46 @@ app.use(express.static("public"));
 const server = http.createServer(app);
 const io = new Server(server);
 
+const recordingsDir = path.join(__dirname, "recordings");
+if (!fs.existsSync(recordingsDir)) {
+  fs.mkdirSync(recordingsDir, { recursive: true });
+}
+
 io.on("connection", (socket) => {
+  console.log("client connected", socket.id);
 
-  console.log("client connected");
+  socket.on("audio.turn", async ({ audioBase64, mimeType }) => {
+    try {
+      if (!audioBase64) {
+        socket.emit("agent.error", "No audio payload received.");
+        return;
+      }
 
-  let buffers = [];
+      const extension = mimeType && mimeType.includes("ogg") ? "ogg" : "webm";
+      const baseName = `${Date.now()}-${socket.id}`;
+      const inputFile = path.join(recordingsDir, `${baseName}.${extension}`);
+      fs.writeFileSync(inputFile, Buffer.from(audioBase64, "base64"));
 
-  // receive audio chunks
-  socket.on("audio.chunk", async (chunk) => {
-    buffers.push(Buffer.from(chunk));
+      const transcript = await stt.transcribe(inputFile);
+      socket.emit("stt", transcript || "");
 
-    // كل 2 ثواني نعالجو
-    if (buffers.length > 8) {
-      const file = `recordings/${Date.now()}.wav`;
-      fs.writeFileSync(file, Buffer.concat(buffers));
-      buffers = [];
+      if (!transcript || !transcript.trim()) {
+        socket.emit("ai", "ماسمعتكش مزيان، عاود قلها مرة أخرى.");
+        return;
+      }
 
-      const text = await stt.transcribe(file);
-      socket.emit("stt", text);
-
-      const reply = await llm.ask(text);
+      const reply = await llm.ask(transcript);
       socket.emit("ai", reply);
-
-      const audio = await tts.speak(reply);
-      socket.emit("tts", audio);
+    } catch (error) {
+      console.error("audio.turn failed", error);
+      socket.emit(
+        "agent.error",
+        "حدث خطأ في المعالجة. تأكد أن Ollama و Whisper خدامين محلياً."
+      );
     }
   });
-
 });
 
-server.listen(3000, () =>
-  console.log("http://localhost:3000")
-);
+server.listen(3000, () => {
+  console.log("http://localhost:3000");
+});

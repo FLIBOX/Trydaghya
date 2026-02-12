@@ -1,51 +1,114 @@
 <!DOCTYPE html>
-<html>
+<html lang="ar" dir="rtl">
 <head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trydaghya - Voice Agent</title>
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="p-10">
+<body class="bg-slate-950 text-white min-h-screen p-6">
+  <div class="max-w-2xl mx-auto">
+    <h1 class="text-2xl font-bold mb-2">وكيل صوتي تجريبي للمطاعم 🍽️</h1>
+    <p class="text-slate-300 mb-6">اضغط "ابدأ"، تكلم بالدارجة/العربية، ومن بعد "حبس" باش يجاوبك الوكيل.</p>
 
-<h1 class="text-xl font-bold mb-4">Realtime Voice Agent 🎤</h1>
+    <div class="flex gap-3 mb-4">
+      <button id="start" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg font-semibold">ابدأ التسجيل</button>
+      <button id="stop" class="bg-rose-600 hover:bg-rose-500 px-4 py-2 rounded-lg font-semibold" disabled>حبس التسجيل</button>
+    </div>
 
-<button id="start" class="bg-green-500 text-white p-3">Start Talking</button>
-<button id="stop" class="bg-red-500 text-white p-3">Stop</button>
+    <div id="status" class="text-sm text-slate-300 mb-4">الحالة: في الانتظار</div>
 
-<div id="log" class="mt-6"></div>
+    <div id="log" class="space-y-3"></div>
+  </div>
 
 <script>
 const socket = io();
 let recorder;
+let chunks = [];
 
-function log(t){
-  document.getElementById("log").innerHTML += "<div>"+t+"</div>";
+const statusEl = document.getElementById("status");
+const logEl = document.getElementById("log");
+const startBtn = document.getElementById("start");
+const stopBtn = document.getElementById("stop");
+
+function setStatus(text) {
+  statusEl.textContent = `الحالة: ${text}`;
 }
 
-document.getElementById("start").onclick = async () => {
+function log(role, text) {
+  const row = document.createElement("div");
+  row.className = "rounded-lg p-3 bg-slate-900 border border-slate-800";
+  row.innerHTML = `<strong>${role}:</strong> ${text}`;
+  logEl.prepend(row);
+}
 
-  const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
+async function blobToBase64(blob) {
+  const buffer = await blob.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
 
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, chunk);
+  }
+
+  return btoa(binary);
+}
+
+startBtn.onclick = async () => {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  chunks = [];
   recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
 
-  recorder.ondataavailable = async (e) => {
-    const buf = await e.data.arrayBuffer();
-    socket.emit("audio.chunk", buf);
+  recorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) chunks.push(e.data);
   };
 
-  recorder.start(250); // every 250ms chunk
+  recorder.onstop = async () => {
+    setStatus("جاري إرسال الصوت...");
+    const blob = new Blob(chunks, { type: "audio/webm" });
+    const audioBase64 = await blobToBase64(blob);
+    socket.emit("audio.turn", { audioBase64, mimeType: "audio/webm" });
+  };
+
+  recorder.start();
+  setStatus("تسجيل الصوت...");
+  startBtn.disabled = true;
+  stopBtn.disabled = false;
 };
 
-document.getElementById("stop").onclick = () => {
-  recorder.stop();
+stopBtn.onclick = () => {
+  if (recorder && recorder.state !== "inactive") {
+    recorder.stop();
+    recorder.stream.getTracks().forEach((t) => t.stop());
+  }
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
 };
 
-socket.on("stt", t => log("User: " + t));
-socket.on("ai", t => log("AI: " + t));
-socket.on("tts", file => {
-  const audio = new Audio(file);
-  audio.play();
+socket.on("stt", (t) => {
+  setStatus("تم تحويل الصوت إلى نص");
+  log("أنت", t || "(ماكانش صوت واضح)");
+});
+
+socket.on("ai", (t) => {
+  setStatus("الوكيل جاوب");
+  log("الوكيل", t);
+
+  if ("speechSynthesis" in window) {
+    const utterance = new SpeechSynthesisUtterance(t);
+    utterance.lang = "ar-MA";
+    speechSynthesis.cancel();
+    speechSynthesis.speak(utterance);
+  }
+});
+
+socket.on("agent.error", (msg) => {
+  setStatus("وقع خطأ");
+  log("خطأ", msg);
 });
 </script>
-
 </body>
 </html>
